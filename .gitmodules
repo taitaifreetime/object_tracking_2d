@@ -1,0 +1,6 @@
+[submodule "object_tracking_2d/hungarian-algorithm-cpp"]
+	path = object_tracking_2d/hungarian-algorithm-cpp
+	url = https://github.com/mcximing/hungarian-algorithm-cpp.git
+[submodule "object_tracking_2d/kalman_filter"]
+	path = object_tracking_2d/kalman_filter
+	url = https://github.com/taitaifreetime/kalman_filter.git
