@@ -33,13 +33,14 @@ set(dependencies
   tf2
   tf2_ros
   tf2_geometry_msgs
+  track_msgs
 )
 
 add_executable(${PROJECT_NAME}_node
   src/main.cpp
   src/laser_scan_filter.cpp
-  src/obstacle_detector.cpp
-  src/obstacle.cpp
+  src/object_tracking.cpp
+  src/object.cpp
   src/system.cpp
   hungarian-algorithm-cpp/Hungarian.cpp
 )

@@ -25,8 +25,8 @@ object_tracking_2d:
         'max_track_num': 100
         'matching_dist': 1.0 # meter
         'maha_dist_sigma': 3.0 # 3 sigma
-        'velocity_sta2dyn': 0.7
-        'frames_sta2dyn': 5
+        'velocity_sta2dyn': 0.8
+        'frames_sta2dyn': 3
         'frames_dyn2sta': 30
         'time_horizon': 2.0
 

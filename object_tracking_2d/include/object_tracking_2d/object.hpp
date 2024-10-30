@@ -1,36 +1,37 @@
 /**
- * @file obstacle.hpp
+ * @file object.hpp
  * @author tomine (tomine@aisl.cs.tut.ac.jp)
- * @brief obstacle class to manage state 
+ * @brief object class to manage state 
  * @version 0.1
  * @date 2024-09-25
  * 
  * @copyright Copyright (c) 2024
  * 
  */
-#ifndef OBSTACLE_HPP
-#define OBSTACLE_HPP
+#ifndef OBJECT_HPP
+#define OBJECT_HPP
 
 #include "kalman_filter.hpp"
 #include "system.hpp"
 #include <memory>
 #include <geometry_msgs/msg/point.hpp>
+#include "track_msgs/msg/track.hpp"
 
 namespace state_estimation
 {
 
 
-class Obstacle
+class Object
 {
     public: 
-        Obstacle(
+        Object(
             const double &time,  
             std::shared_ptr<System> system, 
             const Eigen::VectorXf &observation, 
             const Eigen::MatrixXf &initial_covariance,
             int id
         );
-        ~Obstacle();
+        ~Object();
 
         void predict(const double &dt, const Eigen::VectorXf &control);
         void correct(
@@ -70,6 +71,21 @@ class Obstacle
         void addCurrentTrajectory();
         double computeSquaredMahaDistance(const Eigen::VectorXf &observation) const;
         double computeEuclDistance(const Eigen::VectorXf &observation) const;
+        track_msgs::msg::Track toTrackMsg() const
+        {
+            track_msgs::msg::Track track;
+            track.id = this->id();
+            track.label = this->isDynamic() ? "dynamic" : "static";
+            track.position.x = this->position()[0];
+            track.position.y = this->position()[1];
+            track.position.z = 0.2;
+            track.velocity.x = this->velocity()[0];
+            track.velocity.y = this->velocity()[1];
+            track.velocity.z = 0.0;
+            Eigen::Matrix4f covariance = this->covariance();
+            track.covariance.insert(track.covariance.end(), covariance.data(), covariance.data() + covariance.size());
+            return track;
+        }
 
         std::shared_ptr<KalmanFilter> kf_;
 
@@ -87,4 +103,4 @@ class Obstacle
 
 } // namespace state_estimation
 
-#endif // OBSTACLE_HPP
+#endif // OBJECT_HPP
