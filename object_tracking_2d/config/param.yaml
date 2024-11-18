@@ -9,7 +9,7 @@ object_tracking_2d:
         'frequency': 20
         'lidar_frame': "lower2upper"
         'odom_frame': "odom"
-        'cluster_points': 15
+        'cluster_points': 10
         'cluster_angle_tolerance': 0.78
         'cluster_dist_tolerance': 1.0
 

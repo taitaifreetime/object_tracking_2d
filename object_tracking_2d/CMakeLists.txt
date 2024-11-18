@@ -36,6 +36,27 @@ set(dependencies
   track_msgs
 )
 
+add_library(hungarian_lib hungarian-algorithm-cpp/Hungarian.cpp)
+target_compile_options(hungarian_lib PUBLIC -Wall)
+target_include_directories(hungarian_lib PUBLIC 
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hungarian-algorithm-cpp>
+  $<INSTALL_INTERFACE:include>
+)
+ament_export_targets(export_hungarian HAS_LIBRARY_TARGET)
+install(
+  DIRECTORY include/
+  DESTINATION include
+)
+install(
+  TARGETS
+  hungarian_lib
+  EXPORT export_hungarian
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+  INCLUDES DESTINATION include
+)
+
 add_executable(${PROJECT_NAME}_node
   src/main.cpp
   src/laser_scan_filter.cpp
@@ -45,7 +66,6 @@ add_executable(${PROJECT_NAME}_node
   hungarian-algorithm-cpp/Hungarian.cpp
 )
 ament_target_dependencies(${PROJECT_NAME}_node ${dependencies})
-
 install(
   TARGETS ${PROJECT_NAME}_node
   DESTINATION lib/${PROJECT_NAME}
@@ -54,6 +74,10 @@ install(
 install(
   DIRECTORY launch config include
   DESTINATION share/${PROJECT_NAME}
+)
+install(
+  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/hungarian-algorithm-cpp  # hungarian-algorithm-cppディレクトリをincludeにインストール
+  DESTINATION include
 )
 
 if(BUILD_TESTING)
