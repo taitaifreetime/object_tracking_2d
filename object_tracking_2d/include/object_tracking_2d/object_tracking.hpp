@@ -37,6 +37,7 @@ class ObjectTracking : public rclcpp::Node
 
     private:
         void initializeKFSystem();
+        void initializeLaserScanFilter();
 
         void LaserScanCallback(const sensor_msgs::msg::LaserScan &msg) ;
 

@@ -16,6 +16,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(track_msgs REQUIRED)
+find_package(ros2_cpp_utils REQUIRED)
 
 include_directories(
   include
@@ -34,6 +35,7 @@ set(dependencies
   tf2_ros
   tf2_geometry_msgs
   track_msgs
+  ros2_cpp_utils
 )
 
 add_library(hungarian_lib hungarian-algorithm-cpp/Hungarian.cpp)
@@ -66,6 +68,11 @@ add_executable(${PROJECT_NAME}_node
   hungarian-algorithm-cpp/Hungarian.cpp
 )
 ament_target_dependencies(${PROJECT_NAME}_node ${dependencies})
+target_include_directories(${PROJECT_NAME}_node PUBLIC
+  #$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  $<BUILD_INTERFACE:${ros2_cpp_utils_INCLUDE_DIRS}>
+)
 install(
   TARGETS ${PROJECT_NAME}_node
   DESTINATION lib/${PROJECT_NAME}

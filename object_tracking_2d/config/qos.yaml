@@ -1,0 +1,16 @@
+object_tracking_2d:
+  ros__parameters:
+    'lidar_reliability': "best_effort"
+    'lidar_dulability': "volatile"
+    'lidar_history': "keep_last"
+    'lidar_depth': 1
+
+    'tracks_reliability': "reliable"
+    'tracks_dulability': "volatile"
+    'tracks_history': "keep_last"
+    'tracks_depth': 10
+
+    'visual_reliability': "reliable"
+    'visual_dulability': "volatile"
+    'visual_history': "keep_last"
+    'visual_depth': 5

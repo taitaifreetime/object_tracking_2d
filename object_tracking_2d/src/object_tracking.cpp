@@ -4,6 +4,7 @@
 #include "rcl_interfaces/msg/parameter_descriptor.hpp"
 #include <iostream>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include "ros2_cpp_utils/utils.hpp" // rosparam getter, qos getter
 
 namespace state_estimation
 {
@@ -13,118 +14,25 @@ ObjectTracking::ObjectTracking() : Node("object_tracking_2d"), laser_scan_filter
 {   
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-    this->declare_parameter("lidar_frame", "lidar_frame");
-    this->declare_parameter("odom_frame", "odom_frame");
-    lidar_frame_ = this->get_parameter("lidar_frame").as_string();
-    odom_frame_ = this->get_parameter("odom_frame").as_string();
-
-    /**
-     * @brief param wrt LaserScan Pre-Process 
-     * 
-     */
-    auto range_max_config = rcl_interfaces::msg::ParameterDescriptor{};
-    range_max_config.description = "max distance from lasescan frame to object to be detected";
-    this->declare_parameter("range_max", 30.0, range_max_config);
-    float range_max = this->get_parameter("range_max").as_double();
+    lidar_frame_ = ros2_cpp_utils::utils::getRosParam<std::string>(this, "lidar_frame", "lidar_frame");
+    odom_frame_ = ros2_cpp_utils::utils::getRosParam<std::string>(this, "odom_frame", "odom_frame");
     
-    auto range_min_config = rcl_interfaces::msg::ParameterDescriptor{};
-    range_min_config.description = "min distance from sensor frame to object to be detected";
-    this->declare_parameter("range_min", 0.06, range_min_config);
-    float range_min = this->get_parameter("range_min").as_double();
-    
-    auto angle_max_config = rcl_interfaces::msg::ParameterDescriptor{};
-    angle_max_config.description = "max angle in a horizontal direction to object to be detected";
-    this->declare_parameter("angle_max", 6.2831852, angle_max_config);
-    float angle_max = this->get_parameter("angle_max").as_double();
-    
-    auto angle_min_config = rcl_interfaces::msg::ParameterDescriptor{};
-    angle_min_config.description = "min angle in a horizontal direction to object to be detected";
-    this->declare_parameter("angle_min", 0.0, angle_min_config);
-    float angle_min = this->get_parameter("angle_min").as_double();
-    
-    auto ma_interval_config = rcl_interfaces::msg::ParameterDescriptor{};
-    ma_interval_config.description = "ave of ma_interval samples for moving average pre-process";
-    ma_interval_config.additional_constraints = "resolution of laserscan, ma_interval and cluster_points highly depend on each other";
-    this->declare_parameter("ma_interval", 100, ma_interval_config);
-    int ma_interval = this->get_parameter("ma_interval").as_int();
-
-    // laser scan filter for pre-process
-    laser_scan_filter_ = LaserScanFilter(
-        range_max, 
-        range_min, 
-        angle_max, 
-        angle_min, 
-        ma_interval
-    );
-
-    /**
-     * @brief param wrt clustering objects
-     * 
-     */
-    auto freq_config = rcl_interfaces::msg::ParameterDescriptor{};
-    freq_config.description = "detection callback frequency";
-    freq_config.additional_constraints = "has to be less than lidar scan frequency";
-    this->declare_parameter("frequency", 20, freq_config);
-
-    auto cluster_points_config = rcl_interfaces::msg::ParameterDescriptor{};
-    cluster_points_config.description = "clustering an object";
-    cluster_points_config.additional_constraints = "resolution of laserscan, ma_interval and cluster_points highly depend on each other";
-    this->declare_parameter("cluster_points", 30, cluster_points_config);
-    cluster_points_ = this->get_parameter("cluster_points").as_int();
-    object_center_ = cluster_points_ / 2;
-
-    auto cluster_angle_tolerance_config = rcl_interfaces::msg::ParameterDescriptor{};
-    cluster_angle_tolerance_config.description = "gap between two objects in a horizontal direction";
-    cluster_angle_tolerance_config.additional_constraints = "highly depending on situation (e.g. large number under the situation that there are many objects)";
-    this->declare_parameter("cluster_angle_tolerance", 0.5, cluster_angle_tolerance_config);
-    cluster_angle_tolerance_ = this->get_parameter("cluster_angle_tolerance").as_double();
-
-    auto cluster_dist_tolerance_config = rcl_interfaces::msg::ParameterDescriptor{};
-    cluster_dist_tolerance_config.description = "gap between two objects in a radial direction";
-    cluster_dist_tolerance_config.additional_constraints = "highly depending on situation (e.g. large number under the situation that there are many objects)";
-    this->declare_parameter("cluster_dist_tolerance", 0.5, cluster_dist_tolerance_config);
-    cluster_dist_tolerance_ = this->get_parameter("cluster_dist_tolerance").as_double();
-
-    RCLCPP_WARN(get_logger(), "Laser Scan Filter Parameter");
-    RCLCPP_INFO(get_logger(), "\tlidar_frame: %s", lidar_frame_.c_str());
-    RCLCPP_INFO(get_logger(), "\todom_frame: %s", odom_frame_.c_str());
-    RCLCPP_INFO(get_logger(), "\trange_max: %lf", range_max);
-    RCLCPP_INFO(get_logger(), "\trange_min: %lf", range_min);
-    RCLCPP_INFO(get_logger(), "\tangle_max: %lf", angle_max);
-    RCLCPP_INFO(get_logger(), "\tangle_min: %lf", angle_min);
-    RCLCPP_INFO(get_logger(), "\tma_interval: %d", ma_interval);
-    RCLCPP_INFO(get_logger(), "\tcluster_points: %d", cluster_points_);
-    RCLCPP_INFO(get_logger(), "\tcluster_angle_tolerance: %lf", cluster_angle_tolerance_);
-    RCLCPP_INFO(get_logger(), "\tcluster_dist_tolerance: %lf", cluster_dist_tolerance_);
-    
-    // initialize system to be tracked by kalman filter
+    initializeLaserScanFilter(); 
     initializeKFSystem();
 
     // lidar qos
-    rmw_qos_profile_t custom_qos_profile_lidar = rmw_qos_profile_default;
-    custom_qos_profile_lidar.history = rmw_qos_history_policy_t::RMW_QOS_POLICY_HISTORY_KEEP_LAST;
-    custom_qos_profile_lidar.reliability = rmw_qos_reliability_policy_t::RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT;
-    custom_qos_profile_lidar.durability = rmw_qos_durability_policy_t::RMW_QOS_POLICY_DURABILITY_VOLATILE;
-    rclcpp::QoS qos_profile_lidar(rclcpp::KeepLast(1), custom_qos_profile_lidar);
+    rclcpp::QoS qos_profile_lidar = ros2_cpp_utils::utils::getQoS(this, "lidar_reliability", "lidar_history", "lidar_dulability", "lidar_depth");
     laser_scan_subscriber_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
         "scan", qos_profile_lidar, std::bind(&ObjectTracking::LaserScanCallback, this, std::placeholders::_1));
 
     // tracks with header topic
-    rmw_qos_profile_t custom_qos_profile_tracking = rmw_qos_profile_default;
-    custom_qos_profile_tracking.history = rmw_qos_history_policy_t::RMW_QOS_POLICY_HISTORY_KEEP_LAST;
-    custom_qos_profile_tracking.reliability = rmw_qos_reliability_policy_t::RMW_QOS_POLICY_RELIABILITY_RELIABLE;
-    custom_qos_profile_tracking.durability = rmw_qos_durability_policy_t::RMW_QOS_POLICY_DURABILITY_VOLATILE;
-    rclcpp::QoS qos_profile_tracking(rclcpp::KeepLast(5), custom_qos_profile_tracking);
+    rclcpp::QoS qos_profile_tracking = ros2_cpp_utils::utils::getQoS(this, "tracks_reliability", "tracks_history", "tracks_dulability", "tracks_depth");
     object_publisher_ = this->create_publisher<track_msgs::msg::TrackArray>(
         "tracks", qos_profile_tracking
     );
 
     // visualizer qos
-    rmw_qos_profile_t custom_qos_profile_visualization = rmw_qos_profile_default;
-    custom_qos_profile_visualization.history = rmw_qos_history_policy_t::RMW_QOS_POLICY_HISTORY_KEEP_LAST;
-    custom_qos_profile_visualization.reliability = rmw_qos_reliability_policy_t::RMW_QOS_POLICY_RELIABILITY_RELIABLE;
-    custom_qos_profile_visualization.durability = rmw_qos_durability_policy_t::RMW_QOS_POLICY_DURABILITY_VOLATILE;
-    rclcpp::QoS qos_profile_visualization(rclcpp::KeepLast(5), custom_qos_profile_visualization);
+    rclcpp::QoS qos_profile_visualization = ros2_cpp_utils::utils::getQoS(this, "visual_reliability", "visual_history", "visual_dulability", "visual_depth");
     static_obs_posi_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
         "static_objects/position", qos_profile_visualization);
     static_obs_posi_cov_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
@@ -143,9 +51,11 @@ ObjectTracking::ObjectTracking() : Node("object_tracking_2d"), laser_scan_filter
         "dynamic_objects/velocity", qos_profile_visualization);
     dynamic_obs_traj_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
         "dynamic_objects/trajectory", qos_profile_visualization);
-
+    int freq = ros2_cpp_utils::utils::getRosParam<int>(this, "frequency", 20, 
+        "detection callback frequency", 
+        "has to be less than lidar scan frequency");
     timer_ = this->create_wall_timer(
-        std::chrono::milliseconds(1000/this->get_parameter("frequency").as_int()),
+        std::chrono::milliseconds(1000/freq),
         std::bind(&ObjectTracking::DetectionCallback, this)
     );
 
@@ -155,45 +65,65 @@ ObjectTracking::ObjectTracking() : Node("object_tracking_2d"), laser_scan_filter
 }
 ObjectTracking::~ObjectTracking(){}
 
+void ObjectTracking::initializeLaserScanFilter()
+{
+    // param wrt laser scan filter
+    float range_max = ros2_cpp_utils::utils::getRosParam<double>(this, "range_max", 30.0, 
+        "max distance from lasescan frame to object to be detected");
+    float range_min = ros2_cpp_utils::utils::getRosParam<double>(this, "range_min", 0.06, 
+        "min distance from sensor frame to object to be detected");
+    float angle_max = ros2_cpp_utils::utils::getRosParam<double>(this, "angle_max", 6.2831852, 
+        "max angle in a horizontal direction to object to be detected");
+    float angle_min = ros2_cpp_utils::utils::getRosParam<double>(this, "angle_min", 0.0, 
+        "min angle in a horizontal direction to object to be detected");
+    int ma_interval = ros2_cpp_utils::utils::getRosParam<int>(this, "ma_interval", 100, 
+        "ave of ma_interval samples for moving average pre-process", 
+        "resolution of laserscan, ma_interval and cluster_points highly depend on each other");
+    laser_scan_filter_ = LaserScanFilter(range_max, range_min, angle_max, angle_min, ma_interval);
+
+    // param wrt clustering objects
+    cluster_points_ = ros2_cpp_utils::utils::getRosParam<int>(this, "cluster_points", 30, 
+        "clustering an object", 
+        "resolution of laserscan, ma_interval and cluster_points highly depend on each other");
+    object_center_ = cluster_points_ / 2;
+    cluster_angle_tolerance_ = ros2_cpp_utils::utils::getRosParam<double>(this, "cluster_angle_tolerance", 0.5, 
+        "gap between two objects in a horizontal direction", 
+        "highly depending on situation (e.g. large number under the situation that there are many objects)");
+    cluster_dist_tolerance_ = ros2_cpp_utils::utils::getRosParam<double>(this, "cluster_dist_tolerance", 0.5, 
+        "gap between two objects in a radial direction", 
+        "highly depending on situation (e.g. large number under the situation that there are many objects)");
+
+    RCLCPP_WARN(get_logger(), "Laser Scan Filter Parameter");
+    RCLCPP_INFO(get_logger(), "\tlidar_frame: %s", lidar_frame_.c_str());
+    RCLCPP_INFO(get_logger(), "\todom_frame: %s", odom_frame_.c_str());
+    RCLCPP_INFO(get_logger(), "\trange_max: %lf", range_max);
+    RCLCPP_INFO(get_logger(), "\trange_min: %lf", range_min);
+    RCLCPP_INFO(get_logger(), "\tangle_max: %lf", angle_max);
+    RCLCPP_INFO(get_logger(), "\tangle_min: %lf", angle_min);
+    RCLCPP_INFO(get_logger(), "\tma_interval: %d", ma_interval);
+    RCLCPP_INFO(get_logger(), "\tcluster_points: %d", cluster_points_);
+    RCLCPP_INFO(get_logger(), "\tcluster_angle_tolerance: %lf", cluster_angle_tolerance_);
+    RCLCPP_INFO(get_logger(), "\tcluster_dist_tolerance: %lf", cluster_dist_tolerance_);
+}
+
 void ObjectTracking::initializeKFSystem()
 {
-    /**
-     * @brief Kalmn Filter param
-     * 
-     */
-    // process noise param def
-    auto kf_param_config = rcl_interfaces::msg::ParameterDescriptor{};
-    kf_param_config.description = "variance wrt position noise";
-    this->declare_parameter("position_noise_variance", 1.0, kf_param_config);
-    float position_noise_variance = this->get_parameter("position_noise_variance").as_double();
-    kf_param_config = rcl_interfaces::msg::ParameterDescriptor{};
-    kf_param_config.description = "variance wrt velocity noise";
-    this->declare_parameter("velocity_noise_variance", 1.0, kf_param_config);
-    float velocity_noise_variance = this->get_parameter("velocity_noise_variance").as_double();
-    // observation noise param def
-    kf_param_config = rcl_interfaces::msg::ParameterDescriptor{};
-    kf_param_config.description = "variance wrt observation noise";
-    this->declare_parameter("observation_noise_variance", 1.0, kf_param_config);
-    float observation_noise_variance = this->get_parameter("observation_noise_variance").as_double();
-    // initial covariance param def
-    kf_param_config = rcl_interfaces::msg::ParameterDescriptor{};
-    kf_param_config.description = "variance wrt position error";
-    this->declare_parameter("position_error_variance", 1.0, kf_param_config);
-    float position_error_variance = this->get_parameter("position_error_variance").as_double();
-    kf_param_config = rcl_interfaces::msg::ParameterDescriptor{};
-    kf_param_config.description = "variance wrt velocity error";
-    this->declare_parameter("velocity_error_variance", 1.0, kf_param_config);
-    float velocity_error_variance = this->get_parameter("velocity_error_variance").as_double();
-
-    /**
-     * @brief constant acceleration model
-     * 
-     */
-    // process noise
+    // noise param 
+    float position_noise_variance = ros2_cpp_utils::utils::getRosParam<double>(this, "position_noise_variance", 1.0, 
+        "variance wrt position noise");
+    float velocity_noise_variance = ros2_cpp_utils::utils::getRosParam<double>(this, "velocity_noise_variance", 1.0, 
+        "variance wrt velocity noise");
+    float observation_noise_variance = ros2_cpp_utils::utils::getRosParam<double>(this, "observation_noise_variance", 1.0, 
+        "variance wrt observation noise");
+    // initial covariance param 
+    float position_error_variance = ros2_cpp_utils::utils::getRosParam<double>(this, "position_error_variance", 1.0, 
+        "variance wrt position error");
+    float velocity_error_variance = ros2_cpp_utils::utils::getRosParam<double>(this, "velocity_error_variance", 1.0, 
+        "variance wrt velocity error");
+    // noise
     Eigen::MatrixXf process_noise = Eigen::MatrixXf::Identity(4, 4);
     process_noise.block(0,0, 2,2) *= position_noise_variance;
     process_noise.block(2,2, 2,2) *= velocity_noise_variance;
-    // observation noise
     Eigen::MatrixXf observation_noise = Eigen::MatrixXf::Identity(2, 2)*observation_noise_variance;
     // system model
     Eigen::Matrix<float, 4, 4> system_model;
@@ -206,15 +136,8 @@ void ObjectTracking::initializeKFSystem()
     observation_model.setZero();
     observation_model.block(0,0, 2,2) = Eigen::Matrix2f::Identity();
     // initialize system
-    system_.reset(
-        new System(
-            process_noise, 
-            observation_noise, 
-            system_model, 
-            control_model, 
-            observation_model
-        )
-    );
+    system_.reset(new System(process_noise, observation_noise, system_model, control_model, observation_model));
+
     // initial covariance
     initial_covariance_ = Eigen::MatrixXf::Identity(4, 4);
     initial_covariance_.block(0,0, 2,2) *= position_error_variance;
@@ -241,46 +164,33 @@ void ObjectTracking::initializeKFSystem()
     }
 
     // threshold parameter def for tracking
-    kf_param_config = rcl_interfaces::msg::ParameterDescriptor{};
-    kf_param_config.description = "frame out if object has not been corrected for over this";
-    this->declare_parameter("frames_limit", 1, kf_param_config);
-    frames_limit_ = this->get_parameter("frames_limit").as_int();
-    kf_param_config = rcl_interfaces::msg::ParameterDescriptor{};
-    kf_param_config.description = "untracked if object velocity is higher than this";
-    this->declare_parameter("velocity_limit", 1.0, kf_param_config);
-    velocity_limit_ = this->get_parameter("velocity_limit").as_double();
-    kf_param_config = rcl_interfaces::msg::ParameterDescriptor{};
-    kf_param_config.description = "matching with observation within this distance";
-    this->declare_parameter("matching_dist", 1.0, kf_param_config);
-    matching_dist_ = this->get_parameter("matching_dist").as_double();
-    kf_param_config = rcl_interfaces::msg::ParameterDescriptor{};
-    kf_param_config.description = "outlier if out of range of this sigma thresh";
-    this->declare_parameter("maha_dist_sigma", 1.0, kf_param_config);
-    maha_dist_sigma_ = this->get_parameter("maha_dist_sigma").as_double();
+    frames_limit_ = ros2_cpp_utils::utils::getRosParam<int>(this, "frames_limit", 1, 
+        "frame out if object has not been corrected for over this");
+    velocity_limit_ = ros2_cpp_utils::utils::getRosParam<double>(this, "velocity_limit", 1.0, 
+        "untracked if object velocity is higher than this");
+    matching_dist_ = ros2_cpp_utils::utils::getRosParam<double>(this, "matching_dist", 1.0, 
+        "matching with observation within this distance");
+    maha_dist_sigma_ = ros2_cpp_utils::utils::getRosParam<double>(this, "maha_dist_sigma", 1.0, 
+        "outlier if out of range of this sigma threshe");
     maha_dist_sigma_2_ = std::pow(maha_dist_sigma_, 2.0);
-    kf_param_config = rcl_interfaces::msg::ParameterDescriptor{};
-    kf_param_config.description = "velocity criteria to determine dynamic or static object";
-    this->declare_parameter("velocity_sta2dyn", 1.0, kf_param_config);
-    velocity_sta2dyn_ = this->get_parameter("velocity_sta2dyn").as_double();
-    kf_param_config = rcl_interfaces::msg::ParameterDescriptor{};
-    kf_param_config.description = "the number of frames to be changed from static to dynamic";
-    this->declare_parameter("frames_sta2dyn", 20, kf_param_config);
-    frames_sta2dyn_ = this->get_parameter("frames_sta2dyn").as_int();
-    kf_param_config = rcl_interfaces::msg::ParameterDescriptor{};
-    kf_param_config.description = "the number of frames to be changed from dynamic to static";
-    this->declare_parameter("frames_dyn2sta", 20, kf_param_config);
-    frames_dyn2sta_ = this->get_parameter("frames_dyn2sta").as_int();
-    kf_param_config = rcl_interfaces::msg::ParameterDescriptor{};
-    kf_param_config.description = "person position in this time step";
-    this->declare_parameter("time_horizon", 1.0, kf_param_config);
-    time_horizon_ = this->get_parameter("time_horizon").as_double();
-    this->declare_parameter("max_track_num", 1000);
-    max_track_num_ = this->get_parameter("max_track_num").as_int();
+    velocity_sta2dyn_ = ros2_cpp_utils::utils::getRosParam<double>(this, "velocity_sta2dyn", 1.0, 
+        "velocity criteria to determine dynamic or static object");
+    frames_sta2dyn_ = ros2_cpp_utils::utils::getRosParam<int>(this, "frames_sta2dyn", 20, 
+        "the number of frames to be changed from static to dynamic");
+    frames_dyn2sta_ = ros2_cpp_utils::utils::getRosParam<int>(this, "frames_dyn2sta", 20, 
+        "the number of frames to be changed from dynamic to static");
+    time_horizon_ = ros2_cpp_utils::utils::getRosParam<double>(this, "time_horizon", 1.0, 
+        "person position in this time step");
+    max_track_num_ = ros2_cpp_utils::utils::getRosParam<int>(this, "max_track_num", 1000);
 
     std::random_device rd;
     gen_= std::mt19937(rd());
     distr_ = std::uniform_int_distribution<>(1, max_track_num_);
 
+    visualize_covariance_ = ros2_cpp_utils::utils::getRosParam<bool>(this, "visualize_covariance", false);
+    visualize_trajectory_ = ros2_cpp_utils::utils::getRosParam<bool>(this, "visualize_trajectory", false);
+    visualize_next_position_ = ros2_cpp_utils::utils::getRosParam<bool>(this, "visualize_next_position", false);
+    
     RCLCPP_INFO(get_logger(), "\tframes_limit: %d", frames_limit_);
     RCLCPP_INFO(get_logger(), "\tvelocity_limit: %.3lf", velocity_limit_);
     RCLCPP_INFO(get_logger(), "\tmatching_dist: %.3lf", matching_dist_);
@@ -290,13 +200,6 @@ void ObjectTracking::initializeKFSystem()
     RCLCPP_INFO(get_logger(), "\tframes_sta2dyn: %d", frames_sta2dyn_);
     RCLCPP_INFO(get_logger(), "\tfuture_time: %.3lf", time_horizon_);
     RCLCPP_INFO(get_logger(), "\tmax_track_num: %d", max_track_num_);
-
-    this->declare_parameter("visualize_covariance", false);
-    this->declare_parameter("visualize_trajectory", false);
-    this->declare_parameter("visualize_next_position", false);
-    visualize_covariance_ = this->get_parameter("visualize_covariance").as_bool();
-    visualize_trajectory_ = this->get_parameter("visualize_trajectory").as_bool();
-    visualize_next_position_ = this->get_parameter("visualize_next_position").as_bool();
     RCLCPP_INFO(get_logger(), "\tvisualize_covariance: %d", visualize_covariance_);
     RCLCPP_INFO(get_logger(), "\tvisualize_trajectory: %d", visualize_trajectory_);
     RCLCPP_INFO(get_logger(), "\tvisualize_next_position: %d", visualize_next_position_);

@@ -14,7 +14,10 @@ def generate_launch_description():
             executable='object_tracking_2d_node',
             name='object_tracking_2d',
             output='screen',
-            parameters=[param],
+            parameters=[
+                os.path.join(this_pkg, 'config/param.yaml'), 
+                os.path.join(this_pkg, 'config/qos.yaml')
+            ],
             emulate_tty=True,
         ),
     ])
