@@ -89,7 +89,7 @@ void Object::addCurrentTrajectory()
     geometry_msgs::msg::Point p;
     p.x = this->position()[0];
     p.y = this->position()[1];
-    p.z = 0.1;
+    p.z = 0.2;
     if (trajectory_.size() > 50) trajectory_.erase(trajectory_.begin());
     trajectory_.push_back(p);
 }

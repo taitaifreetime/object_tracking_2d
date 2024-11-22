@@ -12,8 +12,9 @@ def generate_launch_description():
         Node(
             package='object_tracking_2d',
             executable='object_tracking_2d_node',
-            name='object_tracking_2d',
+            name='tracker',
             output='screen',
+            namespace='object_tracking', 
             parameters=[
                 os.path.join(this_pkg, 'config/param.yaml'), 
                 os.path.join(this_pkg, 'config/qos.yaml')

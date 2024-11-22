@@ -1,36 +1,37 @@
-object_tracking_2d:
-    ros__parameters:
-        # laser scan pre-process
-        'range_max': 25.0
-        'range_min': 0.25
-        'angle_max': 6.2831852
-        'angle_min': 0.0
-        'ma_interval': 3
-        'frequency': 20
-        'lidar_frame': "lower2upper"
-        'odom_frame': "odom"
-        'cluster_points': 10
-        'cluster_angle_tolerance': 0.78
-        'cluster_dist_tolerance': 1.0
+object_tracking:
+    tracker:
+        ros__parameters:
+            # laser scan pre-process
+            'range_max': 25.0
+            'range_min': 0.25
+            'angle_max': 6.2831852
+            'angle_min': 0.0
+            'ma_interval': 3
+            'frequency': 20
+            'lidar_frame': "lower2upper"
+            'odom_frame': "odom"
+            'cluster_points': 10
+            'cluster_angle_tolerance': 0.78
+            'cluster_dist_tolerance': 1.0
 
-        # kalman filter 
-        'position_noise_variance': 0.001
-        'velocity_noise_variance': 0.005
-        'observation_noise_variance': 0.1
-        'position_error_variance': 0.01 # times 10
-        'velocity_error_variance': 0.01 # times 10
-        # tracking threshold
-        'frames_limit': 20 # frames_limit/frequency [s]
-        'velocity_limit': 2.5
-        'max_track_num': 100
-        'matching_dist': 1.0 # meter
-        'maha_dist_sigma': 3.0 # 3 sigma
-        'velocity_sta2dyn': 0.8
-        'frames_sta2dyn': 3
-        'frames_dyn2sta': 30
-        'time_horizon': 2.0
+            # kalman filter 
+            'position_noise_variance': 0.001
+            'velocity_noise_variance': 0.005
+            'observation_noise_variance': 0.1
+            'position_error_variance': 0.01 # times 10
+            'velocity_error_variance': 0.01 # times 10
+            # tracking threshold
+            'frames_limit': 20 # frames_limit/frequency [s]
+            'velocity_limit': 2.5
+            'max_track_num': 100
+            'matching_dist': 1.0 # meter
+            'maha_dist_sigma': 3.0 # 3 sigma
+            'velocity_sta2dyn': 0.8
+            'frames_sta2dyn': 3
+            'frames_dyn2sta': 30
+            'time_horizon': 2.0
 
-        # visualize
-        'visualize_covariance': true
-        'visualize_trajectory': true
-        'visualize_next_position': true
+            # visualize
+            'visualize_covariance': true
+            'visualize_trajectory': true
+            'visualize_next_position': true

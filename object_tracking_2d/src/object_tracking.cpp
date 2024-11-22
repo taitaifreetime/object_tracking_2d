@@ -5,6 +5,7 @@
 #include <iostream>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include "ros2_cpp_utils/utils.hpp" // rosparam getter, qos getter
+#include "ros2_cpp_utils/rviz.hpp" // visualization utils
 
 namespace state_estimation
 {
@@ -23,7 +24,7 @@ ObjectTracking::ObjectTracking() : Node("object_tracking_2d"), laser_scan_filter
     // lidar qos
     rclcpp::QoS qos_profile_lidar = ros2_cpp_utils::utils::getQoS(this, "lidar_reliability", "lidar_history", "lidar_dulability", "lidar_depth");
     laser_scan_subscriber_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
-        "scan", qos_profile_lidar, std::bind(&ObjectTracking::LaserScanCallback, this, std::placeholders::_1));
+        "/scan", qos_profile_lidar, std::bind(&ObjectTracking::scanCallback, this, std::placeholders::_1));
 
     // tracks with header topic
     rclcpp::QoS qos_profile_tracking = ros2_cpp_utils::utils::getQoS(this, "tracks_reliability", "tracks_history", "tracks_dulability", "tracks_depth");
@@ -34,29 +35,29 @@ ObjectTracking::ObjectTracking() : Node("object_tracking_2d"), laser_scan_filter
     // visualizer qos
     rclcpp::QoS qos_profile_visualization = ros2_cpp_utils::utils::getQoS(this, "visual_reliability", "visual_history", "visual_dulability", "visual_depth");
     static_obs_posi_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-        "static_objects/position", qos_profile_visualization);
+        "objects/static/position", qos_profile_visualization);
     static_obs_posi_cov_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-        "static_objects/position/covariance", qos_profile_visualization);
+        "objects/static/position/covariance", qos_profile_visualization);
     static_obs_vel_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-        "static_objects/velocity", qos_profile_visualization);
+        "objects/static/velocity", qos_profile_visualization);
     static_obs_traj_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-        "static_objects/trajectory", qos_profile_visualization);
+        "objects/static/trajectory", qos_profile_visualization);
     dynamic_obs_posi_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-        "dynamic_objects/position", qos_profile_visualization);
+        "objects/dynamic/position", qos_profile_visualization);
     dynamic_obs_next_posi_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-        "dynamic_objects/next_position", qos_profile_visualization);
+        "objects/dynamic/next_position", qos_profile_visualization);
     dynamic_obs_posi_cov_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-        "dynamic_objects/position/covariance", qos_profile_visualization);
+        "objects/dynamic/position/covariance", qos_profile_visualization);
     dynamic_obs_vel_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-        "dynamic_objects/velocity", qos_profile_visualization);
+        "objects/dynamic/velocity", qos_profile_visualization);
     dynamic_obs_traj_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-        "dynamic_objects/trajectory", qos_profile_visualization);
+        "objects/dynamic/trajectory", qos_profile_visualization);
     int freq = ros2_cpp_utils::utils::getRosParam<int>(this, "frequency", 20, 
         "detection callback frequency", 
         "has to be less than lidar scan frequency");
     timer_ = this->create_wall_timer(
         std::chrono::milliseconds(1000/freq),
-        std::bind(&ObjectTracking::DetectionCallback, this)
+        std::bind(&ObjectTracking::trackingCallback, this)
     );
 
     prev_stamp_ = this->get_clock()->now();
@@ -205,9 +206,9 @@ void ObjectTracking::initializeKFSystem()
     RCLCPP_INFO(get_logger(), "\tvisualize_next_position: %d", visualize_next_position_);
 }
 
-void ObjectTracking::LaserScanCallback(const sensor_msgs::msg::LaserScan &msg){scan_ = msg;}
+void ObjectTracking::scanCallback(const sensor_msgs::msg::LaserScan &msg){scan_ = msg;}
 
-void ObjectTracking::DetectionCallback()
+void ObjectTracking::trackingCallback()
 {
     // laser scan pre-process
     std::vector<LaserScanFilter::PreProcScan> preproc_scans;
@@ -451,14 +452,11 @@ std::vector<LaserScanFilter::PreProcScan> ObjectTracking::computeLocalMinimums(
 
 void ObjectTracking::publishObjects(const rclcpp::Time &stamp) const
 {
-    // color
-    std_msgs::msg::ColorRGBA light_green, dark_green;
-    light_green.r = 0.3;
-    light_green.g = 1.0;
-    light_green.b = 0.3;
-    dark_green.r = 0.0;
-    dark_green.g = 0.5;
-    dark_green.b = 0.5;
+    namespace rviz_utils = ros2_cpp_utils::rviz;
+
+    std_msgs::msg::ColorRGBA light_green = rviz_utils::getColor(rviz_utils::GREEN, 1.0);
+    std_msgs::msg::ColorRGBA dark_green = rviz_utils::getColor(rviz_utils::BLUE_GREEN, 1.0);
+    std_msgs::msg::Header header = rviz_utils::getHeader(stamp, odom_frame_);
 
     visualization_msgs::msg::MarkerArray markers, markers_vel; // static osb position & velocity marker array
     visualization_msgs::msg::MarkerArray dyn_markers, dyn_markers_vel; // dynamic obs position & velocity marker array
@@ -467,44 +465,36 @@ void ObjectTracking::publishObjects(const rclcpp::Time &stamp) const
     visualization_msgs::msg::MarkerArray dyn_markers_pos_cov, dyn_markers_traj; // dynamic obs position covariance & trajectory marker array
     
     track_msgs::msg::TrackArray tracks;
-    tracks.header.stamp = stamp;
-    tracks.header.frame_id = odom_frame_;
-    // position marker
-    visualization_msgs::msg::Marker marker;
-    marker.header = tracks.header;
-    marker.type = visualization_msgs::msg::Marker::CYLINDER;
-    marker.action = visualization_msgs::msg::Marker::ADD;
+    tracks.header = header;
+
+    visualization_msgs::msg::Marker marker = visualization_msgs::msg::MarkerTemplate(header, visualization_msgs::msg::Marker::CYLINDER);
     marker.pose.position.z = 0.2;
     marker.scale.x = 0.2;
     marker.scale.y = 0.2;
     marker.scale.z = 0.4;
-    marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
-    marker.lifetime = rclcpp::Duration::from_seconds(0.07);
 
     // duplicate for text visualization
-    visualization_msgs::msg::Marker marker_id_text = marker;
-    marker_id_text.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+    visualization_msgs::msg::Marker marker_id_text = visualization_msgs::msg::MarkerTemplate(header, visualization_msgs::msg::Marker::TEXT_VIEW_FACING, rviz_utils::BLACK);
     marker_id_text.pose.position.z = 0.5;
-    marker_id_text.color.a = 1.0; // black
-    marker_id_text.color.r = 0.0;
-    marker_id_text.color.g = 0.0;
-    marker_id_text.color.b = 0.0;
+    marker_id_text.scale.x = 0.2;
+    marker_id_text.scale.y = 0.2;
+    marker_id_text.scale.z = 0.4;
 
     // duplicate velicity marker
-    visualization_msgs::msg::Marker marker_vel = marker;
-    marker_vel.type = visualization_msgs::msg::Marker::ARROW;
+    visualization_msgs::msg::Marker marker_vel = visualization_msgs::msg::MarkerTemplate(header, visualization_msgs::msg::Marker::ARROW);
+    marker_vel.pose.position.z = 0.2;
+    marker_vel.scale.x = 0.2;
+    marker_vel.scale.y = 0.2;
+    marker_vel.scale.z = 0.4;
     marker_vel.scale.x = 0.0;
     marker_vel.scale.y = 0.1;
     marker_vel.scale.z = 0.1;
 
     // duplicate for covariance 
-    visualization_msgs::msg::Marker marker_pos_cov;
-    marker_pos_cov = marker;
+    visualization_msgs::msg::Marker marker_pos_cov = visualization_msgs::msg::MarkerTemplate(header, visualization_msgs::msg::Marker::CYLINDER);
 
     // duplicate for trajectory
-    visualization_msgs::msg::Marker marker_traj;
-    marker_traj = marker;
-    marker_traj.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    visualization_msgs::msg::Marker marker_traj =visualization_msgs::msg::MarkerTemplate(header, visualization_msgs::msg::Marker::LINE_STRIP);
     marker_traj.scale.x = 0.03;
 
     int num_objects = objects_.size();
