@@ -29,7 +29,7 @@ ObjectTracking::ObjectTracking() : Node("object_tracking_2d"), laser_scan_filter
     // tracks with header topic
     rclcpp::QoS qos_profile_tracking = ros2_cpp_utils::utils::getQoS(this, "tracks_reliability", "tracks_history", "tracks_dulability", "tracks_depth");
     object_publisher_ = this->create_publisher<track_msgs::msg::TrackArray>(
-        "tracks", qos_profile_tracking
+        "objects", qos_profile_tracking
     );
 
     // visualizer qos
@@ -44,8 +44,6 @@ ObjectTracking::ObjectTracking() : Node("object_tracking_2d"), laser_scan_filter
         "objects/static/trajectory", qos_profile_visualization);
     dynamic_obs_posi_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
         "objects/dynamic/position", qos_profile_visualization);
-    dynamic_obs_next_posi_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-        "objects/dynamic/next_position", qos_profile_visualization);
     dynamic_obs_posi_cov_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
         "objects/dynamic/position/covariance", qos_profile_visualization);
     dynamic_obs_vel_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
@@ -171,17 +169,15 @@ void ObjectTracking::initializeKFSystem()
         "untracked if object velocity is higher than this");
     matching_dist_ = ros2_cpp_utils::utils::getRosParam<double>(this, "matching_dist", 1.0, 
         "matching with observation within this distance");
-    maha_dist_sigma_ = ros2_cpp_utils::utils::getRosParam<double>(this, "maha_dist_sigma", 1.0, 
+    double maha_dist_sigma = ros2_cpp_utils::utils::getRosParam<double>(this, "maha_dist_sigma", 1.0, 
         "outlier if out of range of this sigma threshe");
-    maha_dist_sigma_2_ = std::pow(maha_dist_sigma_, 2.0);
+    maha_dist_sigma_2_ = std::pow(maha_dist_sigma, 2.0);
     velocity_sta2dyn_ = ros2_cpp_utils::utils::getRosParam<double>(this, "velocity_sta2dyn", 1.0, 
         "velocity criteria to determine dynamic or static object");
     frames_sta2dyn_ = ros2_cpp_utils::utils::getRosParam<int>(this, "frames_sta2dyn", 20, 
         "the number of frames to be changed from static to dynamic");
     frames_dyn2sta_ = ros2_cpp_utils::utils::getRosParam<int>(this, "frames_dyn2sta", 20, 
         "the number of frames to be changed from dynamic to static");
-    time_horizon_ = ros2_cpp_utils::utils::getRosParam<double>(this, "time_horizon", 1.0, 
-        "person position in this time step");
     max_track_num_ = ros2_cpp_utils::utils::getRosParam<int>(this, "max_track_num", 1000);
 
     std::random_device rd;
@@ -190,20 +186,17 @@ void ObjectTracking::initializeKFSystem()
 
     visualize_covariance_ = ros2_cpp_utils::utils::getRosParam<bool>(this, "visualize_covariance", false);
     visualize_trajectory_ = ros2_cpp_utils::utils::getRosParam<bool>(this, "visualize_trajectory", false);
-    visualize_next_position_ = ros2_cpp_utils::utils::getRosParam<bool>(this, "visualize_next_position", false);
     
     RCLCPP_INFO(get_logger(), "\tframes_limit: %d", frames_limit_);
     RCLCPP_INFO(get_logger(), "\tvelocity_limit: %.3lf", velocity_limit_);
     RCLCPP_INFO(get_logger(), "\tmatching_dist: %.3lf", matching_dist_);
-    RCLCPP_INFO(get_logger(), "\tmaha_dist_sigma: %.3lf", maha_dist_sigma_);
+    RCLCPP_INFO(get_logger(), "\tmaha_dist_sigma^2: %.3lf", maha_dist_sigma_2_);
     RCLCPP_INFO(get_logger(), "\tvelocity_sta2dyn: %.3lf", velocity_sta2dyn_);
     RCLCPP_INFO(get_logger(), "\tframes_dyn2sta: %d", frames_dyn2sta_);
     RCLCPP_INFO(get_logger(), "\tframes_sta2dyn: %d", frames_sta2dyn_);
-    RCLCPP_INFO(get_logger(), "\tfuture_time: %.3lf", time_horizon_);
     RCLCPP_INFO(get_logger(), "\tmax_track_num: %d", max_track_num_);
     RCLCPP_INFO(get_logger(), "\tvisualize_covariance: %d", visualize_covariance_);
     RCLCPP_INFO(get_logger(), "\tvisualize_trajectory: %d", visualize_trajectory_);
-    RCLCPP_INFO(get_logger(), "\tvisualize_next_position: %d", visualize_next_position_);
 }
 
 void ObjectTracking::scanCallback(const sensor_msgs::msg::LaserScan &msg){scan_ = msg;}
@@ -456,11 +449,11 @@ void ObjectTracking::publishObjects(const rclcpp::Time &stamp) const
 
     std_msgs::msg::ColorRGBA light_green = rviz_utils::getColor(rviz_utils::GREEN, 1.0);
     std_msgs::msg::ColorRGBA dark_green = rviz_utils::getColor(rviz_utils::BLUE_GREEN, 1.0);
+    std_msgs::msg::ColorRGBA black = rviz_utils::getColor(rviz_utils::BLACK, 1.0);
     std_msgs::msg::Header header = rviz_utils::getHeader(stamp, odom_frame_);
 
     visualization_msgs::msg::MarkerArray markers, markers_vel; // static osb position & velocity marker array
     visualization_msgs::msg::MarkerArray dyn_markers, dyn_markers_vel; // dynamic obs position & velocity marker array
-    visualization_msgs::msg::MarkerArray dyn_next_markers; // dynamic obs next position marker array
     visualization_msgs::msg::MarkerArray markers_pos_cov, markers_traj; // static obs position covariance & trajectory marker array
     visualization_msgs::msg::MarkerArray dyn_markers_pos_cov, dyn_markers_traj; // dynamic obs position covariance & trajectory marker array
     
@@ -505,139 +498,104 @@ void ObjectTracking::publishObjects(const rclcpp::Time &stamp) const
         track_msgs::msg::Track track = objects_[i]->toTrackMsg();
         tracks.tracks.push_back(track);
 
+        // add position & text marker
+        marker.id = track.id*2; // position marker array contains position & id visualization 
+        marker.pose.position = track.position;
+        marker.color.a = 1.0;
+        marker_id_text.id = marker.id+1; // position marker array contains position & id visualization 
+        marker_id_text.pose.position.x = track.position.x;
+        marker_id_text.pose.position.y = track.position.y;
+        marker_id_text.text = std::to_string(objects_[i]->id());
+
+        // add velocity marker
+        marker_vel.id = marker.id;
+        marker_vel.pose.position = track.position;
+        tf2::Quaternion q;
+        q.setRPY(0, 0, atan2(track.velocity.y, track.velocity.x));
+        marker_vel.pose.orientation = tf2::toMsg(q);
+        marker_vel.scale.x = std::max(static_cast<double>(objects_[i]->velocity().norm()), 0.0000001);
+        marker_vel.color = dark_green;
+        marker_vel.color.a = 1.0;
+
         if (objects_[i]->isDynamic())
         {
-            // add position & text marker
-            marker.id = track.id*2; // position marker array contains position & id visualization 
-            marker.pose.position = track.position;
             marker.color = dark_green;
-            marker.color.a = 1.0;
-            dyn_markers.markers.push_back(marker);
-            marker_id_text.id = marker.id+1; // position marker array contains position & id visualization 
-            marker_id_text.pose.position.x = track.position.x;
-            marker_id_text.pose.position.y = track.position.y;
-            marker_id_text.text = std::to_string(objects_[i]->id());
-            dyn_markers.markers.push_back(marker_id_text);
-
-            // add velocity marker
-            marker_vel.id = marker.id;
-            marker_vel.pose.position = track.position;
-            tf2::Quaternion q;
-            q.setRPY(0, 0, atan2(track.velocity.y, track.velocity.x));
-            marker_vel.pose.orientation = tf2::toMsg(q);
-            marker_vel.scale.x = std::max(static_cast<double>(objects_[i]->velocity().norm()), 0.0000001);
+            marker_id_text.color = black;
             marker_vel.color = dark_green;
-            marker_vel.color.a = 1.0;
+            dyn_markers.markers.push_back(marker);
+            dyn_markers.markers.push_back(marker_id_text);
             dyn_markers_vel.markers.push_back(marker_vel);
+        }
+        else
+        {
+            marker.color = light_green;
+            marker_id_text.color = black;
+            marker_vel.color = light_green;
+            markers.markers.push_back(marker);
+            markers.markers.push_back(marker_id_text);
+            markers_vel.markers.push_back(marker_vel);
+        }
+        
 
-            // add next position
-            if (visualize_next_position_)
+        // add covariance marker
+        double sq_chi_99 = 9.21034;
+        if (visualize_covariance_)
+        {
+            Eigen::Matrix2f covariance = objects_[i]->covariance().block(0,0, 2,2); // get covariance wrt position
+            Eigen::SelfAdjointEigenSolver<Eigen::Matrix2f> eigen_solver(covariance);
+            Eigen::Vector2f eigenvalues = eigen_solver.eigenvalues();
+            Eigen::Matrix2f eigenvectors = eigen_solver.eigenvectors();
+            Eigen::Vector2f scale = (sq_chi_99 * eigenvalues).array().sqrt();
+
+            marker_pos_cov.id = track.id;
+            marker_pos_cov.scale.x = scale[0];
+            marker_pos_cov.scale.y = scale[1];
+            marker_pos_cov.scale.z = 0.01;
+            marker_pos_cov.pose.position = track.position;
+            marker_pos_cov.pose.position.z = 0.0;
+            tf2::Quaternion q;
+            q.setRPY(0, 0, atan2(eigenvectors(1, 0), eigenvectors(0, 0)));
+            marker_pos_cov.pose.orientation = tf2::toMsg(q);
+            marker_pos_cov.color.a = 0.2;
+            if (objects_[i]->isDynamic())
             {
-                marker.color.a = 0.5;
-                marker.pose.position.x += time_horizon_ * track.velocity.x;
-                marker.pose.position.y += time_horizon_ * track.velocity.y;
-                dyn_next_markers.markers.push_back(marker);
-                dyn_next_markers.markers.push_back(marker_id_text);
-            }
-
-            // add covariance marker
-            if (visualize_covariance_)
-            {
-                Eigen::Matrix2f covariance = objects_[i]->covariance().block(0,0, 2,2); // get covariance wrt position
-                Eigen::SelfAdjointEigenSolver<Eigen::Matrix2f> eigen_solver(covariance);
-                Eigen::Vector2f eigenvalues = eigen_solver.eigenvalues();
-                Eigen::Matrix2f eigenvectors = eigen_solver.eigenvectors();
-                Eigen::Vector2f scale = (maha_dist_sigma_ * 2 * eigenvalues).array().sqrt();
-
-                marker_pos_cov.id = track.id;
-                marker_pos_cov.scale.x = scale[0];
-                marker_pos_cov.scale.y = scale[1];
-                marker_pos_cov.scale.z = 0.01;
-                marker_pos_cov.pose.position = track.position;
-                marker_pos_cov.pose.position.z = 0.0;
-                tf2::Quaternion q;
-                q.setRPY(0, 0, atan2(eigenvectors(1, 0), eigenvectors(0, 0)));
-                marker_pos_cov.pose.orientation = tf2::toMsg(q);
                 marker_pos_cov.color = dark_green;
                 marker_pos_cov.color.a = 0.2;
                 dyn_markers_pos_cov.markers.push_back(marker_pos_cov);
             }
-
-            // add trajectory marker
-            if (visualize_trajectory_)
+            else
             {
-                marker_traj.id = track.id;
-                marker_traj.points = objects_[i]->trajectory();
-                marker_traj.color = dark_green;
-                marker_traj.color.a = 1.0;
-                dyn_markers_traj.markers.push_back(marker_traj);
-            }
-        }
-        else // if static object
-        {
-            // add position & text visualization marker
-            marker.id = track.id*2;
-            marker.pose.position = track.position;
-            marker.color = light_green;
-            marker.color.a = 1.0;
-            markers.markers.push_back(marker);
-            marker_id_text.id = marker.id+1;
-            marker_id_text.pose.position.x = track.position.x;
-            marker_id_text.pose.position.y = track.position.y;
-            marker_id_text.text = std::to_string(track.id);
-            markers.markers.push_back(marker_id_text);
-
-            // add velocity marker
-            marker_vel.id = marker.id;
-            marker_vel.pose.position = track.position;
-            tf2::Quaternion q;
-            q.setRPY(0, 0, atan2(track.velocity.y, track.velocity.x));
-            marker_vel.pose.orientation = tf2::toMsg(q);
-            marker_vel.scale.x = std::max(static_cast<double>(objects_[i]->velocity().norm()), 0.0000001);
-            marker_vel.color = light_green;
-            marker_vel.color.a = 1.0;
-            markers_vel.markers.push_back(marker_vel);
-            
-            // add covariance marker
-            if (visualize_covariance_)
-            {
-                Eigen::Matrix2f covariance = objects_[i]->covariance().block(0,0, 2,2); // get covariance wrt position
-                Eigen::SelfAdjointEigenSolver<Eigen::Matrix2f> eigen_solver(covariance);
-                Eigen::Vector2f eigenvalues = eigen_solver.eigenvalues();
-                Eigen::Matrix2f eigenvectors = eigen_solver.eigenvectors();
-                Eigen::Vector2f scale = (maha_dist_sigma_ * 2 * eigenvalues).array().sqrt();
-
-                marker_pos_cov.id = track.id;
-                marker_pos_cov.scale.x = scale[0];
-                marker_pos_cov.scale.y = scale[1];
-                marker_pos_cov.scale.z = 0.01;
-                marker_pos_cov.pose.position = marker.pose.position;
-                marker_pos_cov.pose.position.z = 0.0;
-                tf2::Quaternion q;
-                q.setRPY(0, 0, atan2(eigenvectors(1, 0), eigenvectors(0, 0)));
-                marker_pos_cov.pose.orientation = tf2::toMsg(q);
                 marker_pos_cov.color = light_green;
                 marker_pos_cov.color.a = 0.2;
                 markers_pos_cov.markers.push_back(marker_pos_cov);
             }
+        }
 
-            // add trajectory marker
-            if (visualize_trajectory_)
+        // add trajectory marker
+        if (visualize_trajectory_)
+        {
+            marker_traj.id = track.id;
+            marker_traj.points = objects_[i]->trajectory();
+            marker_traj.color.a = 1.0;
+            if (objects_[i]->isDynamic())
             {
-                marker_traj.id = track.id;
-                marker_traj.points = objects_[i]->trajectory();
+                marker_traj.color = dark_green;
+                dyn_markers_traj.markers.push_back(marker_traj);
+            }
+            else
+            {
                 marker_traj.color = light_green;
-                marker_traj.color.a = 1.0;
                 markers_traj.markers.push_back(marker_traj);
             }
+            
         }
     }
+        
     object_publisher_->publish(tracks);
     static_obs_posi_marker_publisher_->publish(markers);
     static_obs_vel_marker_publisher_->publish(markers_vel);
     dynamic_obs_posi_marker_publisher_->publish(dyn_markers);
     dynamic_obs_vel_marker_publisher_->publish(dyn_markers_vel);
-    if (visualize_next_position_) dynamic_obs_next_posi_marker_publisher_->publish(dyn_next_markers);
     if (visualize_covariance_) 
     {
         static_obs_posi_cov_marker_publisher_->publish(markers_pos_cov);

@@ -74,7 +74,6 @@ class ObjectTracking : public rclcpp::Node
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr static_obs_traj_marker_publisher_; 
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr static_obs_vel_marker_publisher_; 
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr dynamic_obs_posi_marker_publisher_;
-        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr dynamic_obs_next_posi_marker_publisher_; 
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr dynamic_obs_posi_cov_marker_publisher_; 
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr dynamic_obs_traj_marker_publisher_; 
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr dynamic_obs_vel_marker_publisher_; 
@@ -96,12 +95,10 @@ class ObjectTracking : public rclcpp::Node
         double velocity_limit_;
         int max_track_num_;
         double matching_dist_;
-        double maha_dist_sigma_, maha_dist_sigma_2_;
+        double maha_dist_sigma_2_;
         double velocity_sta2dyn_;
         int frames_dyn2sta_, frames_sta2dyn_;
-        double time_horizon_;
         // visualizer
-        bool visualize_next_position_;
         bool visualize_covariance_;
         bool visualize_trajectory_;
         double confidence_interval_;

@@ -1,5 +1,5 @@
-object_tracking:
-  tracker:
+tracking:
+  lidar_object_tracker:
     ros__parameters:
       'lidar_reliability': "best_effort"
       'lidar_dulability': "volatile"

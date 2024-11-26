@@ -12,3 +12,6 @@ geometry_msgs/Vector3 velocity
 
 # covariance of position and velocity
 float64[] covariance
+
+# appearance feature if exist
+float64[] feature

@@ -1,5 +1,5 @@
-object_tracking:
-    tracker:
+tracking:
+    lidar_object_tracker:
         ros__parameters:
             # laser scan pre-process
             'range_max': 25.0
@@ -10,7 +10,7 @@ object_tracking:
             'frequency': 20
             'lidar_frame': "lower2upper"
             'odom_frame': "odom"
-            'cluster_points': 10
+            'cluster_points': 15
             'cluster_angle_tolerance': 0.78
             'cluster_dist_tolerance': 1.0
 
@@ -29,9 +29,7 @@ object_tracking:
             'velocity_sta2dyn': 0.8
             'frames_sta2dyn': 3
             'frames_dyn2sta': 30
-            'time_horizon': 2.0
 
             # visualize
             'visualize_covariance': true
             'visualize_trajectory': true
-            'visualize_next_position': true
