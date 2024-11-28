@@ -169,9 +169,6 @@ void ObjectTracking::initializeKFSystem()
         "untracked if object velocity is higher than this");
     matching_dist_ = ros2_cpp_utils::utils::getRosParam<double>(this, "matching_dist", 1.0, 
         "matching with observation within this distance");
-    double maha_dist_sigma = ros2_cpp_utils::utils::getRosParam<double>(this, "maha_dist_sigma", 1.0, 
-        "outlier if out of range of this sigma threshe");
-    maha_dist_sigma_2_ = std::pow(maha_dist_sigma, 2.0);
     velocity_sta2dyn_ = ros2_cpp_utils::utils::getRosParam<double>(this, "velocity_sta2dyn", 1.0, 
         "velocity criteria to determine dynamic or static object");
     frames_sta2dyn_ = ros2_cpp_utils::utils::getRosParam<int>(this, "frames_sta2dyn", 20, 
@@ -184,25 +181,44 @@ void ObjectTracking::initializeKFSystem()
     gen_= std::mt19937(rd());
     distr_ = std::uniform_int_distribution<>(1, max_track_num_);
 
-    visualize_covariance_ = ros2_cpp_utils::utils::getRosParam<bool>(this, "visualize_covariance", false);
-    visualize_trajectory_ = ros2_cpp_utils::utils::getRosParam<bool>(this, "visualize_trajectory", false);
+    visualize_ = ros2_cpp_utils::utils::getRosParam<bool>(this, "visualize", false);
     
     RCLCPP_INFO(get_logger(), "\tframes_limit: %d", frames_limit_);
     RCLCPP_INFO(get_logger(), "\tvelocity_limit: %.3lf", velocity_limit_);
     RCLCPP_INFO(get_logger(), "\tmatching_dist: %.3lf", matching_dist_);
-    RCLCPP_INFO(get_logger(), "\tmaha_dist_sigma^2: %.3lf", maha_dist_sigma_2_);
     RCLCPP_INFO(get_logger(), "\tvelocity_sta2dyn: %.3lf", velocity_sta2dyn_);
     RCLCPP_INFO(get_logger(), "\tframes_dyn2sta: %d", frames_dyn2sta_);
     RCLCPP_INFO(get_logger(), "\tframes_sta2dyn: %d", frames_sta2dyn_);
     RCLCPP_INFO(get_logger(), "\tmax_track_num: %d", max_track_num_);
-    RCLCPP_INFO(get_logger(), "\tvisualize_covariance: %d", visualize_covariance_);
-    RCLCPP_INFO(get_logger(), "\tvisualize_trajectory: %d", visualize_trajectory_);
+    RCLCPP_INFO(get_logger(), "\tvisualize: %d", visualize_);
 }
 
 void ObjectTracking::scanCallback(const sensor_msgs::msg::LaserScan &msg){scan_ = msg;}
 
 void ObjectTracking::trackingCallback()
 {
+    // get transform
+    rclcpp::Time cur_stamp;
+    tf2::Transform odom2lidar;
+    try 
+    {
+        cur_stamp = scan_.header.stamp;
+        geometry_msgs::msg::TransformStamped lidar2odom_msg = 
+            tf_buffer_->lookupTransform(odom_frame_, scan_.header.frame_id, cur_stamp, tf2::durationFromSec(0.1));
+        tf2::fromMsg(lidar2odom_msg.transform, odom2lidar);
+        RCLCPP_DEBUG(get_logger(), "get transform from [%s] to [%s]", lidar_frame_.c_str(), odom_frame_.c_str());
+    }
+    catch (tf2::TransformException &ex) 
+    {
+        RCLCPP_DEBUG(this->get_logger(), "%s", ex.what());
+        scan_ = sensor_msgs::msg::LaserScan{};
+        return;
+    }
+
+    objects_msg_ = track_msgs::msg::TrackArray{};
+    objects_msg_.header.frame_id = odom_frame_;
+    objects_msg_.header.stamp = cur_stamp;
+
     // laser scan pre-process
     std::vector<LaserScanFilter::PreProcScan> preproc_scans;
     laser_scan_filter_.PreProc(scan_, preproc_scans);
@@ -210,22 +226,6 @@ void ObjectTracking::trackingCallback()
     // compute local minimums, means detect object candidates
     std::vector<LaserScanFilter::PreProcScan> local_minimums = computeLocalMinimums(scan_, preproc_scans);
     RCLCPP_INFO(get_logger(), "Object candidates: %d", local_minimums.size());
-
-    // get transform
-    rclcpp::Time cur_stamp = this->get_clock()->now();
-    tf2::Transform odom2lidar;
-    try 
-    {
-        geometry_msgs::msg::TransformStamped lidar2odom_msg = 
-            tf_buffer_->lookupTransform(odom_frame_, lidar_frame_, cur_stamp, tf2::durationFromSec(0.1));
-        tf2::fromMsg(lidar2odom_msg.transform, odom2lidar);
-        RCLCPP_DEBUG(get_logger(), "get transform from [%s] to [%s]", lidar_frame_.c_str(), odom_frame_.c_str());
-    }
-    catch (tf2::TransformException &ex) 
-    {
-        RCLCPP_DEBUG(this->get_logger(), "%s", ex.what());
-        return;
-    }
 
     // transform from lidar_frame to odom_frame
     std::vector<Eigen::Vector2f> observations;
@@ -248,7 +248,6 @@ void ObjectTracking::trackingCallback()
         observations.push_back(observation);
     }
     
-    double cur_time = cur_stamp.nanoseconds()/1000000000.0;
     std::vector<int> unmatched_observation_id;
     if (objects_.size() > 0)
     {
@@ -263,7 +262,8 @@ void ObjectTracking::trackingCallback()
         for (int i=0; i<objects_.size(); i++)
         {
             objects_.at(i)->predict(
-                (cur_stamp-prev_stamp_).nanoseconds()/1000000000.0, 
+                cur_stamp, 
+                prev_stamp_,
                 control
             );
             RCLCPP_WARN(get_logger(), "\tid%d predicted. vel %.3lf", objects_.at(i)->id(), objects_.at(i)->velocity().norm());
@@ -272,16 +272,15 @@ void ObjectTracking::trackingCallback()
             // compute cost
             int len_traj = objects_.at(i)->trajectory().size();
             std::vector<double> cost_row;
+            double sq_chi_99 = 9.21034;
             for (int j=0; j<observations.size(); j++)
             {
                 double eucl_dist = objects_.at(i)->computeEuclDistance(observations[j]);
-                double squared_maha_dist = objects_.at(i)->computeSquaredMahaDistance(observations[j]);
-                double weight = (
-                    (squared_maha_dist < maha_dist_sigma_2_ ? 1.0 : 100.0) // mahalanobis gate
-                    * (len_traj > 30 ? 1.0 : 2.0)  // existing track with longer trajectory should be easilr associated
-                    // * (objects_.at(i)->isStillTentative() ? 2.0 : 1.0)
-                );
-                cost_row.push_back(eucl_dist * weight);
+                double sq_maha_dist = objects_.at(i)->computeSquaredMahaDistance(observations[j]);
+                double maha_gate = sq_maha_dist < sq_chi_99 ? 0.0 : 100.0;
+                // double c = eucl_dist + maha_gate;
+                double c = sq_maha_dist;
+                cost_row.push_back(c);
             }
             cost.push_back(cost_row);
         }
@@ -301,11 +300,13 @@ void ObjectTracking::trackingCallback()
             auto itr = std::find(assignment.begin(), assignment.end(), i);
             int index = std::distance(assignment.begin(), itr);
             try{
-                if (objects_.at(index)->computeEuclDistance(observations.at(i))<matching_dist_)
+                double sq_chi_99 = 9.21034;
+                double sq_maha_dist = objects_.at(index)->computeSquaredMahaDistance(observations.at(i));
+                double eucl_dist = objects_.at(index)->computeEuclDistance(observations.at(i));
+                if (eucl_dist<matching_dist_)
                 {
                     objects_.at(index)->correct(
                         observations.at(i), 
-                        cur_time, 
                         frames_sta2dyn_, frames_dyn2sta_,  
                         velocity_sta2dyn_
                     );
@@ -327,14 +328,16 @@ void ObjectTracking::trackingCallback()
                 existing_ids_.erase(objects_.at(i)->id());
                 objects_.erase(objects_.begin()+i);
             }
-            else i++;
+            else 
+            {
+                track_msgs::msg::Track track = objects_[i]->toTrackMsg();
+                objects_msg_.tracks.push_back(track);
+                i++;
+            }
         }
 
     }
-    else
-    {
-        for (int i=0; i<observations.size(); i++) unmatched_observation_id.push_back(i);
-    }
+    else for (int i=0; i<observations.size(); i++) unmatched_observation_id.push_back(i);
         
 
     /**
@@ -363,14 +366,14 @@ void ObjectTracking::trackingCallback()
                 0.0, 
                 0.0;
             objects_.push_back(std::make_shared<Object>(
-                cur_time, system_, observation, initial_covariance_, new_id));
+                system_, observation, initial_covariance_, new_id));
             RCLCPP_WARN(get_logger(), "\tid%d join.", new_id);
         }
         catch (std::out_of_range& ex) {continue;}
     }
 
-
-    publishObjects(cur_stamp);
+    object_publisher_->publish(objects_msg_);
+    if (visualize_) visualizeObjects(cur_stamp);
     
     prev_stamp_ = cur_stamp;
 }
@@ -443,7 +446,7 @@ std::vector<LaserScanFilter::PreProcScan> ObjectTracking::computeLocalMinimums(
     return candidates;
 }
 
-void ObjectTracking::publishObjects(const rclcpp::Time &stamp) const
+void ObjectTracking::visualizeObjects(const rclcpp::Time &stamp) const
 {
     namespace rviz_utils = ros2_cpp_utils::rviz;
 
@@ -490,13 +493,10 @@ void ObjectTracking::publishObjects(const rclcpp::Time &stamp) const
     visualization_msgs::msg::Marker marker_traj =visualization_msgs::msg::MarkerTemplate(header, visualization_msgs::msg::Marker::LINE_STRIP);
     marker_traj.scale.x = 0.03;
 
-    int num_objects = objects_.size();
+    int num_objects = objects_msg_.tracks.size();
     for (int i=0; i<num_objects; i++)
     {
-        if (objects_[i]->isStillTentative()) continue;
-
-        track_msgs::msg::Track track = objects_[i]->toTrackMsg();
-        tracks.tracks.push_back(track);
+        track_msgs::msg::Track track = objects_msg_.tracks[i];
 
         // add position & text marker
         marker.id = track.id*2; // position marker array contains position & id visualization 
@@ -510,9 +510,9 @@ void ObjectTracking::publishObjects(const rclcpp::Time &stamp) const
         // add velocity marker
         marker_vel.id = marker.id;
         marker_vel.pose.position = track.position;
-        tf2::Quaternion q;
-        q.setRPY(0, 0, atan2(track.velocity.y, track.velocity.x));
-        marker_vel.pose.orientation = tf2::toMsg(q);
+        tf2::Quaternion q_vel;
+        q_vel.setRPY(0, 0, atan2(track.velocity.y, track.velocity.x));
+        marker_vel.pose.orientation = tf2::toMsg(q_vel);
         marker_vel.scale.x = std::max(static_cast<double>(objects_[i]->velocity().norm()), 0.0000001);
         marker_vel.color = dark_green;
         marker_vel.color.a = 1.0;
@@ -539,73 +539,67 @@ void ObjectTracking::publishObjects(const rclcpp::Time &stamp) const
 
         // add covariance marker
         double sq_chi_99 = 9.21034;
-        if (visualize_covariance_)
+        Eigen::Matrix2f covariance = objects_[i]->covariance().block(0,0, 2,2); // get covariance wrt position
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix2f> eigen_solver(covariance);
+        Eigen::Vector2f eigenvalues = eigen_solver.eigenvalues();
+        Eigen::Matrix2f eigenvectors = eigen_solver.eigenvectors();
+        Eigen::Vector2f scale = (sq_chi_99 * eigenvalues).array().sqrt();
+        marker_pos_cov.id = track.id;
+        marker_pos_cov.scale.x = scale[0];
+        marker_pos_cov.scale.y = scale[1];
+        marker_pos_cov.scale.z = 0.01;
+        marker_pos_cov.pose.position = track.position;
+        marker_pos_cov.pose.position.z = 0.0;
+        tf2::Quaternion q_cov;
+        q_cov.setRPY(0, 0, atan2(eigenvectors(1, 0), eigenvectors(0, 0)));
+        marker_pos_cov.pose.orientation = tf2::toMsg(q_cov);
+        marker_pos_cov.color.a = 0.2;
+        if (objects_[i]->isDynamic())
         {
-            Eigen::Matrix2f covariance = objects_[i]->covariance().block(0,0, 2,2); // get covariance wrt position
-            Eigen::SelfAdjointEigenSolver<Eigen::Matrix2f> eigen_solver(covariance);
-            Eigen::Vector2f eigenvalues = eigen_solver.eigenvalues();
-            Eigen::Matrix2f eigenvectors = eigen_solver.eigenvectors();
-            Eigen::Vector2f scale = (sq_chi_99 * eigenvalues).array().sqrt();
-
-            marker_pos_cov.id = track.id;
-            marker_pos_cov.scale.x = scale[0];
-            marker_pos_cov.scale.y = scale[1];
-            marker_pos_cov.scale.z = 0.01;
-            marker_pos_cov.pose.position = track.position;
-            marker_pos_cov.pose.position.z = 0.0;
-            tf2::Quaternion q;
-            q.setRPY(0, 0, atan2(eigenvectors(1, 0), eigenvectors(0, 0)));
-            marker_pos_cov.pose.orientation = tf2::toMsg(q);
+            marker_pos_cov.color = dark_green;
             marker_pos_cov.color.a = 0.2;
-            if (objects_[i]->isDynamic())
-            {
-                marker_pos_cov.color = dark_green;
-                marker_pos_cov.color.a = 0.2;
-                dyn_markers_pos_cov.markers.push_back(marker_pos_cov);
-            }
-            else
-            {
-                marker_pos_cov.color = light_green;
-                marker_pos_cov.color.a = 0.2;
-                markers_pos_cov.markers.push_back(marker_pos_cov);
-            }
+            dyn_markers_pos_cov.markers.push_back(marker_pos_cov);
+        }
+        else
+        {
+            marker_pos_cov.color = light_green;
+            marker_pos_cov.color.a = 0.2;
+            markers_pos_cov.markers.push_back(marker_pos_cov);
         }
 
         // add trajectory marker
-        if (visualize_trajectory_)
+        marker_traj.id = track.id;
+        std::vector<geometry_msgs::msg::Point> points;
+        std::vector<geometry_msgs::msg::PointStamped> stamped_points = objects_[i]->trajectory();
+        std::transform(
+            stamped_points.begin(),
+            stamped_points.end(),
+            std::back_inserter(points),
+            [](const geometry_msgs::msg::PointStamped& stamped_point) {
+                return stamped_point.point;
+            }
+        );
+        marker_traj.points = points;
+        marker_traj.color.a = 1.0;
+        if (objects_[i]->isDynamic())
         {
-            marker_traj.id = track.id;
-            marker_traj.points = objects_[i]->trajectory();
-            marker_traj.color.a = 1.0;
-            if (objects_[i]->isDynamic())
-            {
-                marker_traj.color = dark_green;
-                dyn_markers_traj.markers.push_back(marker_traj);
-            }
-            else
-            {
-                marker_traj.color = light_green;
-                markers_traj.markers.push_back(marker_traj);
-            }
-            
+            marker_traj.color = dark_green;
+            dyn_markers_traj.markers.push_back(marker_traj);
+        }
+        else
+        {
+            marker_traj.color = light_green;
+            markers_traj.markers.push_back(marker_traj);
         }
     }
-        
-    object_publisher_->publish(tracks);
     static_obs_posi_marker_publisher_->publish(markers);
     static_obs_vel_marker_publisher_->publish(markers_vel);
     dynamic_obs_posi_marker_publisher_->publish(dyn_markers);
     dynamic_obs_vel_marker_publisher_->publish(dyn_markers_vel);
-    if (visualize_covariance_) 
-    {
-        static_obs_posi_cov_marker_publisher_->publish(markers_pos_cov);
-        dynamic_obs_posi_cov_marker_publisher_->publish(dyn_markers_pos_cov);
-    }
-    if (visualize_trajectory_) 
-    {
-        static_obs_traj_marker_publisher_->publish(markers_traj);
-        dynamic_obs_traj_marker_publisher_->publish(dyn_markers_traj);
-    }
+    static_obs_posi_cov_marker_publisher_->publish(markers_pos_cov);
+    dynamic_obs_posi_cov_marker_publisher_->publish(dyn_markers_pos_cov);
+    static_obs_traj_marker_publisher_->publish(markers_traj);
+    dynamic_obs_traj_marker_publisher_->publish(dyn_markers_traj);
 }
 
 } // namespace state_estimation

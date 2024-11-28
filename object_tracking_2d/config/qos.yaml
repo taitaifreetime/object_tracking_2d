@@ -14,4 +14,4 @@ tracking:
       'visual_reliability': "reliable"
       'visual_dulability': "volatile"
       'visual_history': "keep_last"
-      'visual_depth': 5
+      'visual_depth': 10

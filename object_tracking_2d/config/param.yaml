@@ -15,21 +15,20 @@ tracking:
             'cluster_dist_tolerance': 1.0
 
             # kalman filter 
-            'position_noise_variance': 0.001
-            'velocity_noise_variance': 0.005
-            'observation_noise_variance': 0.1
-            'position_error_variance': 0.01 # times 10
-            'velocity_error_variance': 0.01 # times 10
+            'position_noise_variance': 0.0009 # 0.03[m]^2
+            'velocity_noise_variance': 0.0049 # 0.07[m]^2
+            'observation_noise_variance': 0.25 # 0.2[m]^2
+            'position_error_variance': 0.09 # 1[m]^2
+            'velocity_error_variance': 0.09 # 1[m]^2
             # tracking threshold
-            'frames_limit': 20 # frames_limit/frequency [s]
+            # frames/frequency = seconds
+            'frames_limit': 30 
             'velocity_limit': 2.5
             'max_track_num': 100
             'matching_dist': 1.0 # meter
-            'maha_dist_sigma': 3.0 # 3 sigma
             'velocity_sta2dyn': 0.8
-            'frames_sta2dyn': 3
+            'frames_sta2dyn': 15
             'frames_dyn2sta': 30
 
             # visualize
-            'visualize_covariance': true
-            'visualize_trajectory': true
+            'visualize': true

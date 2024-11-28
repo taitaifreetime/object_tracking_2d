@@ -14,8 +14,9 @@
 #include "kalman_filter.hpp"
 #include "system.hpp"
 #include <memory>
-#include <geometry_msgs/msg/point.hpp>
+#include <geometry_msgs/msg/point_stamped.hpp>
 #include "track_msgs/msg/track.hpp"
+#include <rclcpp/rclcpp.hpp>
 
 namespace state_estimation
 {
@@ -25,7 +26,6 @@ class Object
 {
     public: 
         Object(
-            const double &time,  
             std::shared_ptr<System> system, 
             const Eigen::VectorXf &observation, 
             const Eigen::MatrixXf &initial_covariance,
@@ -33,22 +33,25 @@ class Object
         );
         ~Object();
 
-        void predict(const double &dt, const Eigen::VectorXf &control);
+        void predict(
+            const rclcpp::Time &cur_stamp, 
+            const rclcpp::Time &prev_stamp, 
+            const Eigen::VectorXf &control);
         void correct(
             const Eigen::VectorXf &observation, 
-            const double &cur_time, 
             int frames_sta2dyn, int frames_dyn2sta,  
             const double &vel_thresh);
 
         int id() const {return id_;}
-        Eigen::VectorXf state() const;
-        Eigen::VectorXf position() const;
-        Eigen::VectorXf velocity() const;
-        Eigen::VectorXf acceleration() const;
-        Eigen::MatrixXf covariance() const;
-        std::vector<geometry_msgs::msg::Point> trajectory() const {return this->trajectory_;}
+        
+        Eigen::VectorXf state() const {return kf_->getState();}
+        Eigen::VectorXf position() const {return kf_->getState().head<2>();}
+        Eigen::VectorXf velocity() const {return kf_->getState().segment(2, 2);}
+        Eigen::VectorXf acceleration() const {return kf_->getState().tail<2>();}
+        Eigen::MatrixXf covariance() const {return kf_->getCovariance().block(0,0, 4,4);}
+        // Eigen::MatrixXf obscovariance() const {return kf_->getObsCovariance().block(0,0, 2,2);}
+        std::vector<geometry_msgs::msg::PointStamped> trajectory() const {return this->trajectory_;}
 
-        bool isTimeoutOverThan(const double &timeout, const double &cur_time) const {return timeout < cur_time - prev_time_;}
         bool isUncorrectedOverThan(int frames_limit) const {return frames_limit < frames_uncorrected_;}
         bool isHigherSpeedThan(const double &velocity_limit) const 
         {
@@ -68,7 +71,7 @@ class Object
         bool isStillTentative() const {return tentative_;}
         bool isFramesOld() const {return age_;}
         bool isDynamic() const {return dynamic_;}
-        void addCurrentTrajectory();
+        void addCurrentTrajectory(const rclcpp::Time &stamp);
         double computeSquaredMahaDistance(const Eigen::VectorXf &observation) const;
         double computeEuclDistance(const Eigen::VectorXf &observation) const;
         track_msgs::msg::Track toTrackMsg() const
@@ -84,6 +87,7 @@ class Object
             track.velocity.z = 0.0;
             Eigen::Matrix4f covariance = this->covariance();
             track.covariance.insert(track.covariance.end(), covariance.data(), covariance.data() + covariance.size());
+            track.trajectory = this->trajectory();
             return track;
         }
 
@@ -93,11 +97,10 @@ class Object
         int id_;
         bool tentative_, dynamic_;
         int frames_dynamic_, frames_static_;
-        int frames_uncorrected_, frames_corrected_;
+        int frames_uncorrected_;
         int age_;
-        double prev_time_;
         Eigen::Matrix2f inversed_posi_cov_;
-        std::vector<geometry_msgs::msg::Point> trajectory_;
+        std::vector<geometry_msgs::msg::PointStamped> trajectory_;
 };
 
 

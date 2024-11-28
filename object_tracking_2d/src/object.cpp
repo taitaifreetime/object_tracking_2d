@@ -4,20 +4,17 @@ namespace state_estimation
 {
 
 Object::Object(
-    const double &time, 
     std::shared_ptr<System> system,
     const Eigen::VectorXf &observation, 
     const Eigen::MatrixXf &initial_covariance, 
     int id
 ){
-    prev_time_ = time;
     id_ = id;
     tentative_ = true;
     dynamic_ = false;
     frames_dynamic_ = 0;
     frames_static_ = 0;
     frames_uncorrected_ = 0;
-    frames_corrected_ = 0;
     age_ = 0;
     kf_.reset(new KalmanFilter(system, observation, initial_covariance));
 }
@@ -25,11 +22,12 @@ Object::Object(
 Object::~Object(){}
 
 void Object::predict(
-    const double &dt, 
+    const rclcpp::Time &cur_stamp,
+    const rclcpp::Time &prev_stamp, 
     const Eigen::VectorXf &control)
 {
-    this->kf_->predict(dt, control); // must
-    this->addCurrentTrajectory();
+    this->kf_->predict((cur_stamp-prev_stamp).nanoseconds()/1000000000.0, control); // must
+    this->addCurrentTrajectory(cur_stamp);
     this->frames_uncorrected_++;
     this->age_++;
     this->inversed_posi_cov_ = this->covariance().block(0,0, 2,2).inverse();
@@ -37,15 +35,11 @@ void Object::predict(
 
 void Object::correct(
     const Eigen::VectorXf &observation, 
-    const double &cur_time, 
     int frames_sta2dyn, int frames_dyn2sta,  
     const double &vel_thresh)
 {
     this->kf_->correct(observation); // must
     this->frames_uncorrected_ = 0;
-    this->frames_corrected_++;
-    this->prev_time_ = cur_time;
-    // if (this->age_ == this->frames_corrected_ && this->age_ > 2) this->tentative_ = false;
     this->tentative_ = false;
     if (this->frames_dynamic_ > frames_sta2dyn) this->dynamic_ = true;
     else if (this->frames_static_ > frames_dyn2sta) this->dynamic_ = false;
@@ -62,13 +56,6 @@ void Object::correct(
     }
 }
 
-
-Eigen::VectorXf Object::state() const {return kf_->getState();}
-Eigen::VectorXf Object::position() const {return kf_->getState().head<2>();}
-Eigen::VectorXf Object::velocity() const {return kf_->getState().segment(2, 2);}
-Eigen::VectorXf Object::acceleration() const {return kf_->getState().tail<2>();}
-Eigen::MatrixXf Object::covariance() const {return kf_->getCovariance().block(0,0, 4,4);}
-
 double Object::computeSquaredMahaDistance(const Eigen::VectorXf &observation) const
 {
     Eigen::Vector2f standard_division = this->position() - observation.head<2>();
@@ -84,13 +71,14 @@ double Object::computeEuclDistance(const Eigen::VectorXf &observation) const
         + std::pow(observed_position[1] - estimated_position[1], 2.0));
     return eucl_distance;
 }  
-void Object::addCurrentTrajectory() 
+void Object::addCurrentTrajectory(const rclcpp::Time &stamp) 
 {
-    geometry_msgs::msg::Point p;
-    p.x = this->position()[0];
-    p.y = this->position()[1];
-    p.z = 0.2;
-    if (trajectory_.size() > 50) trajectory_.erase(trajectory_.begin());
+    geometry_msgs::msg::PointStamped p;
+    p.header.stamp = stamp;
+    p.point.x = this->position()[0];
+    p.point.y = this->position()[1];
+    p.point.z = 0.2;
+    if (trajectory_.size() > 20) trajectory_.erase(trajectory_.begin());
     trajectory_.push_back(p);
 }
 

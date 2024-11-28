@@ -15,3 +15,6 @@ float64[] covariance
 
 # appearance feature if exist
 float64[] feature
+
+# trajectory
+geometry_msgs/PointStamped[] trajectory

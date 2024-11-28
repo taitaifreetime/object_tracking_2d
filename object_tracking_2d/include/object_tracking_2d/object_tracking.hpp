@@ -54,7 +54,7 @@ class ObjectTracking : public rclcpp::Node
             const std::vector<LaserScanFilter::PreProcScan> &preproc_scans
         ) const;
 
-        void publishObjects(const rclcpp::Time &stamp) const;
+        void visualizeObjects(const rclcpp::Time &stamp) const;
 
         // laserscan pre-processor
         rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr laser_scan_subscriber_; 
@@ -69,6 +69,7 @@ class ObjectTracking : public rclcpp::Node
         // callback
         rclcpp::TimerBase::SharedPtr timer_;
         rclcpp::Publisher<track_msgs::msg::TrackArray>::SharedPtr object_publisher_;
+        track_msgs::msg::TrackArray objects_msg_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr static_obs_posi_marker_publisher_; 
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr static_obs_posi_cov_marker_publisher_; 
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr static_obs_traj_marker_publisher_; 
@@ -95,13 +96,10 @@ class ObjectTracking : public rclcpp::Node
         double velocity_limit_;
         int max_track_num_;
         double matching_dist_;
-        double maha_dist_sigma_2_;
         double velocity_sta2dyn_;
         int frames_dyn2sta_, frames_sta2dyn_;
         // visualizer
-        bool visualize_covariance_;
-        bool visualize_trajectory_;
-        double confidence_interval_;
+        bool visualize_;
 
         rclcpp::Time prev_stamp_;
 };
