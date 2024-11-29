@@ -36,11 +36,24 @@ class ObjectTracking : public rclcpp::Node
         ~ObjectTracking();
 
     private:
+        /**
+         * @brief initialize kalman filter system
+         * 
+         */
         void initializeKFSystem();
+
+        /**
+         * @brief initialize laser scan  filter
+         * 
+         */
         void initializeLaserScanFilter();
 
         void scanCallback(const sensor_msgs::msg::LaserScan &msg) ;
 
+        /**
+         * @brief tracking loop is activated by timer
+         * 
+         */
         void trackingCallback();
 
         /**
