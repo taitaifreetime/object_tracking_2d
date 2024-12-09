@@ -48,6 +48,26 @@ class ObjectTracking : public rclcpp::Node
          */
         void initializeLaserScanFilter();
 
+        /**
+         * @brief Get the New Id object
+         * 
+         * @return int 
+         */
+        int getNewId()
+        {
+            int new_id;
+            while (true)
+            {
+                new_id = distr_(gen_);
+                if (existing_ids_.find(new_id) == existing_ids_.end())
+                {
+                    existing_ids_.insert(new_id);
+                    break;
+                }
+            }
+            return new_id;
+        }
+
         void scanCallback(const sensor_msgs::msg::LaserScan &msg) ;
 
         /**
@@ -107,7 +127,6 @@ class ObjectTracking : public rclcpp::Node
         // threshold for kalman filter tracking
         int frames_limit_;
         double velocity_limit_;
-        int max_track_num_;
         double matching_dist_;
         double velocity_sta2dyn_;
         int frames_dyn2sta_, frames_sta2dyn_;

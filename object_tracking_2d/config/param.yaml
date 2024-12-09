@@ -24,7 +24,8 @@ tracking:
             # frames/frequency = seconds
             'frames_limit': 30 
             'velocity_limit': 2.5
-            'max_track_num': 100
+            'max_track_id': 256
+            min_track_id: 128
             'matching_dist': 1.0 # meter
             'velocity_sta2dyn': 0.8
             'frames_sta2dyn': 15
