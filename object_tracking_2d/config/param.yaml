@@ -19,16 +19,17 @@ tracking:
             'velocity_noise_variance': 0.0049 # 0.07[m]^2
             'observation_noise_variance': 0.25 # 0.2[m]^2
             'position_error_variance': 0.09 # 1[m]^2
-            'velocity_error_variance': 0.09 # 1[m]^2
+            'velocity_error_variance': 0.49 # 1[m]^2
             # tracking threshold
             # frames/frequency = seconds
             'frames_limit': 30 
-            'velocity_limit': 2.5
-            'max_track_num': 100
+            'velocity_limit': 5.0
+            'max_track_id': 256
+            min_track_id: 128
             'matching_dist': 1.0 # meter
-            'velocity_sta2dyn': 0.8
+            'velocity_sta2dyn': 1.0
             'frames_sta2dyn': 15
-            'frames_dyn2sta': 30
+            'frames_dyn2sta': 15
 
             # visualize
             'visualize': true

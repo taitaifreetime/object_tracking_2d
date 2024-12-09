@@ -24,12 +24,12 @@ ObjectTracking::ObjectTracking() : Node("object_tracking_2d"), laser_scan_filter
     // lidar qos
     rclcpp::QoS qos_profile_lidar = ros2_cpp_utils::utils::getQoS(this, "lidar_reliability", "lidar_history", "lidar_dulability", "lidar_depth");
     laser_scan_subscriber_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
-        "/scan", qos_profile_lidar, std::bind(&ObjectTracking::scanCallback, this, std::placeholders::_1));
+        "/scan", rclcpp::SensorDataQoS(), std::bind(&ObjectTracking::scanCallback, this, std::placeholders::_1));
 
     // tracks with header topic
     rclcpp::QoS qos_profile_tracking = ros2_cpp_utils::utils::getQoS(this, "tracks_reliability", "tracks_history", "tracks_dulability", "tracks_depth");
     object_publisher_ = this->create_publisher<track_msgs::msg::TrackArray>(
-        "objects", qos_profile_tracking
+        "objects", 10
     );
 
     // visualizer qos
@@ -175,11 +175,12 @@ void ObjectTracking::initializeKFSystem()
         "the number of frames to be changed from static to dynamic");
     frames_dyn2sta_ = ros2_cpp_utils::utils::getRosParam<int>(this, "frames_dyn2sta", 20, 
         "the number of frames to be changed from dynamic to static");
-    max_track_num_ = ros2_cpp_utils::utils::getRosParam<int>(this, "max_track_num", 1000);
+    int max_track_id = ros2_cpp_utils::utils::getRosParam<int>(this, "max_track_id", 1000);
+    int min_track_id = ros2_cpp_utils::utils::getRosParam<int>(this, "min_track_id", 1);
 
     std::random_device rd;
     gen_= std::mt19937(rd());
-    distr_ = std::uniform_int_distribution<>(1, max_track_num_);
+    distr_ = std::uniform_int_distribution<>(min_track_id, max_track_id);
 
     visualize_ = ros2_cpp_utils::utils::getRosParam<bool>(this, "visualize", false);
     
@@ -189,7 +190,8 @@ void ObjectTracking::initializeKFSystem()
     RCLCPP_INFO(get_logger(), "\tvelocity_sta2dyn: %.3lf", velocity_sta2dyn_);
     RCLCPP_INFO(get_logger(), "\tframes_dyn2sta: %d", frames_dyn2sta_);
     RCLCPP_INFO(get_logger(), "\tframes_sta2dyn: %d", frames_sta2dyn_);
-    RCLCPP_INFO(get_logger(), "\tmax_track_num: %d", max_track_num_);
+    RCLCPP_INFO(get_logger(), "\tmin_track_id: %d", min_track_id);
+    RCLCPP_INFO(get_logger(), "\tmax_track_id: %d", max_track_id);
     RCLCPP_INFO(get_logger(), "\tvisualize: %d", visualize_);
 }
 
@@ -349,16 +351,7 @@ void ObjectTracking::trackingCallback()
     {
         try
         {
-            int new_id;
-            while (true)
-            {
-                new_id = distr_(gen_);
-                if (existing_ids_.find(new_id) == existing_ids_.end())
-                {
-                    existing_ids_.insert(new_id);
-                    break;
-                }
-            }
+            int new_id = getNewId();
             Eigen::VectorXf observation(4);
             observation << 
                 observations.at(id)[0], 
@@ -472,9 +465,7 @@ void ObjectTracking::visualizeObjects(const rclcpp::Time &stamp) const
     // duplicate for text visualization
     visualization_msgs::msg::Marker marker_id_text = visualization_msgs::msg::MarkerTemplate(header, visualization_msgs::msg::Marker::TEXT_VIEW_FACING, rviz_utils::BLACK);
     marker_id_text.pose.position.z = 0.5;
-    marker_id_text.scale.x = 0.2;
-    marker_id_text.scale.y = 0.2;
-    marker_id_text.scale.z = 0.4;
+    marker_id_text.scale.z = 0.2;
 
     // duplicate velicity marker
     visualization_msgs::msg::Marker marker_vel = visualization_msgs::msg::MarkerTemplate(header, visualization_msgs::msg::Marker::ARROW);
@@ -501,6 +492,7 @@ void ObjectTracking::visualizeObjects(const rclcpp::Time &stamp) const
         // add position & text marker
         marker.id = track.id*2; // position marker array contains position & id visualization 
         marker.pose.position = track.position;
+        marker.pose.position.z/=2.0;
         marker.color.a = 1.0;
         marker_id_text.id = marker.id+1; // position marker array contains position & id visualization 
         marker_id_text.pose.position.x = track.position.x;
@@ -510,6 +502,7 @@ void ObjectTracking::visualizeObjects(const rclcpp::Time &stamp) const
         // add velocity marker
         marker_vel.id = marker.id;
         marker_vel.pose.position = track.position;
+        marker_vel.pose.position.z/=2.0;
         tf2::Quaternion q_vel;
         q_vel.setRPY(0, 0, atan2(track.velocity.y, track.velocity.x));
         marker_vel.pose.orientation = tf2::toMsg(q_vel);

@@ -101,7 +101,7 @@ class Object
             track.label = this->isDynamic() ? "dynamic" : "static";
             track.position.x = this->position()[0];
             track.position.y = this->position()[1];
-            track.position.z = 0.2;
+            track.position.z = 0.4;
             track.velocity.x = this->velocity()[0];
             track.velocity.y = this->velocity()[1];
             track.velocity.z = 0.0;
