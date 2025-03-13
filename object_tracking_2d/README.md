@@ -1,14 +1,12 @@
 # object_tracking_2d
 ***THIS DOCUMENTATION WAS MADE AUTOMATICALLY***  
 ROS 2 package for object tracking using 2D laser scan.
-## :gear: Prepare
-```
-```
-## :rocket: Quick Start !
+
+## :rocket: Quick Start
 ```
 ros2 launch object_tracking_2d object_tracking_2d.launch.py
 ```
-## :thinking: How ?
+## :thinking: How
 #### Key Word : Kalman filter, Hungarian, Local minimum 
 
 This object tracking system leverages Kalman filtering for state estimation and the Hungarian algorithm for data association.

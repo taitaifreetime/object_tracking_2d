@@ -3,9 +3,10 @@ ROS 2 packages for object tracking using 2D laser scan.
 
 ## :rocket: Getting Started 
 ```
+cd your_ws/src
 git clone --recursive https://github.com/taitaifreetime/object_tracking_2d.git
 cd your_ws
-colcon build --packages-select object_tracking_2d
+colcon build --packages-select track_msgs object_tracking_2d
 
 ros2 launch object_tracking_2d object_tracking_2d.launch.py
 ```
